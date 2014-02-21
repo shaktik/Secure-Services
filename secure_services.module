@@ -6,27 +6,57 @@
  */
 
 /**
- * Implementation of hook_perm().
- */
-function secure_services_permission() {
-  return array(
-    'set permission in service basic auth' => array(
-      'title' => t('Permission in service basic'),
-      'description' => t('Set permission in service basic auth administration.'),
-      'restrict access' => TRUE,
-    ),
-  );
-}
-
-/**
  * Implements hook_services_authentication().
  */
 function secure_services_services_authentication_info() {
   return array(
-    'file' => 'secure_services.inc',
-    'title' => t('Http Secure Service authentication'),
-    'description' => t('Username and password are sent in each request'),
-    'authenticate_call' => '_secure_services_authenticate_call',
+      'file' => 'secure_services.inc',
+      'title' => t('Http Secure Service authentication'),
+      'description' => t('Username and password are sent in each request'),
+      'authenticate_call' => '_secure_services_authenticate_call',
   );
 }
 
+function secure_services_perm() {
+  return array('administer secure_services');
+}
+
+function secure_services_basic_call($message = 'This site is protected') {
+  if (php_sapi_name() != 'cli') {
+    // PHP-cgi fix.
+    $a = base64_decode(substr($_SERVER["HTTP_AUTHORIZATION"], 6));
+    if ((strlen($a) == 0) || (strcasecmp($a, ":") == 0)) {
+      header('WWW-Authenticate: Basic realm="Private"');
+      header('HTTP/1.0 401 Unauthorized');
+    } else {
+      list($entered_username, $entered_password) = explode(':', $a);
+      $_SERVER['PHP_AUTH_USER'] = $entered_username;
+      $_SERVER['PHP_AUTH_PW'] = $entered_password;
+    }
+
+    if (isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW'])) {
+      $form_state = array();
+      $form_state['values']['name'] = $_SERVER['PHP_AUTH_USER'];
+      $form_state['values']['pass'] = $_SERVER['PHP_AUTH_PW'];
+      $params =
+              array(
+                  'name' => $form_state['values']['name'],
+                  'pass' => $form_state['values']['pass'], // No need to hash the password
+      );
+      $userRecord = user_authenticate($params);
+      $account = user_load($userRecord->uid);
+      if (!(user_access('administer secure_services', $account))) {
+        echo 'Access denied';
+        exit;
+      }
+    }
+
+    if (!(isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW']))) {
+      header('WWW-Authenticate: Basic realm="' . $message . '"');
+      header('HTTP/1.0 401 Unauthorized');
+      // Fallback message when the user presses cancel / escape.
+      echo 'Access denied';
+      exit;
+    }
+  }
+}
